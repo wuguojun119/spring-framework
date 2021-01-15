@@ -17,7 +17,6 @@
 package org.springframework.http.client.reactive;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.hc.client5.http.cookie.Cookie;
@@ -49,18 +48,22 @@ class HttpComponentsClientHttpResponse implements ClientHttpResponse {
 
 	private final Message<HttpResponse, Publisher<ByteBuffer>> message;
 
+	private final HttpHeaders headers;
+
 	private final HttpClientContext context;
 
 	private final AtomicBoolean rejectSubscribers = new AtomicBoolean();
 
 
 	public HttpComponentsClientHttpResponse(DataBufferFactory dataBufferFactory,
-			Message<HttpResponse, Publisher<ByteBuffer>> message,
-			HttpClientContext context) {
+			Message<HttpResponse, Publisher<ByteBuffer>> message, HttpClientContext context) {
 
 		this.dataBufferFactory = dataBufferFactory;
 		this.message = message;
 		this.context = context;
+
+		MultiValueMap<String, String> adapter = new HttpComponentsHeadersAdapter(message.getHead());
+		this.headers = HttpHeaders.readOnlyHttpHeaders(adapter);
 	}
 
 
@@ -78,20 +81,21 @@ class HttpComponentsClientHttpResponse implements ClientHttpResponse {
 	public MultiValueMap<String, ResponseCookie> getCookies() {
 		LinkedMultiValueMap<String, ResponseCookie> result = new LinkedMultiValueMap<>();
 		this.context.getCookieStore().getCookies().forEach(cookie ->
-				result.add(cookie.getName(), ResponseCookie.fromClientResponse(cookie.getName(), cookie.getValue())
-						.domain(cookie.getDomain())
-						.path(cookie.getPath())
-						.maxAge(getMaxAgeSeconds(cookie))
-						.secure(cookie.isSecure())
-						.httpOnly(cookie.containsAttribute("httponly"))
-						.build()));
+				result.add(cookie.getName(),
+						ResponseCookie.fromClientResponse(cookie.getName(), cookie.getValue())
+								.domain(cookie.getDomain())
+								.path(cookie.getPath())
+								.maxAge(getMaxAgeSeconds(cookie))
+								.secure(cookie.isSecure())
+								.httpOnly(cookie.containsAttribute("httponly"))
+								.sameSite(cookie.getAttribute("samesite"))
+								.build()));
 		return result;
 	}
 
 	private long getMaxAgeSeconds(Cookie cookie) {
 		String maxAgeAttribute = cookie.getAttribute(Cookie.MAX_AGE_ATTR);
-
-		return maxAgeAttribute == null ? -1 : Long.parseLong(maxAgeAttribute);
+		return (maxAgeAttribute != null ? Long.parseLong(maxAgeAttribute) : -1);
 	}
 
 	@Override
@@ -107,9 +111,7 @@ class HttpComponentsClientHttpResponse implements ClientHttpResponse {
 
 	@Override
 	public HttpHeaders getHeaders() {
-		return Arrays.stream(this.message.getHead().getHeaders())
-				.collect(HttpHeaders::new,
-						(httpHeaders, header) -> httpHeaders.add(header.getName(), header.getValue()),
-						HttpHeaders::putAll);
+		return this.headers;
 	}
+
 }

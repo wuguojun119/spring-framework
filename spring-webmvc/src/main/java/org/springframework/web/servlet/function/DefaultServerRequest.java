@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.springframework.web.servlet.function;
 
 import java.io.IOException;
@@ -52,7 +51,7 @@ import org.springframework.http.HttpRange;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.GenericHttpMessageConverter;
 import org.springframework.http.converter.HttpMessageConverter;
-import org.springframework.http.server.PathContainer;
+import org.springframework.http.server.RequestPath;
 import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.lang.Nullable;
 import org.springframework.util.CollectionUtils;
@@ -62,10 +61,9 @@ import org.springframework.util.ObjectUtils;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
-import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import org.springframework.web.util.ServletRequestPathUtils;
 import org.springframework.web.util.UriBuilder;
-import org.springframework.web.util.UrlPathHelper;
 
 /**
  * {@code ServerRequest} implementation based on a {@link HttpServletRequest}.
@@ -77,7 +75,7 @@ class DefaultServerRequest implements ServerRequest {
 
 	private final ServletServerHttpRequest serverHttpRequest;
 
-	private final PathContainer pathContainer;
+	private final RequestPath requestPath;
 
 	private final Headers headers;
 
@@ -102,7 +100,11 @@ class DefaultServerRequest implements ServerRequest {
 		this.params = CollectionUtils.toMultiValueMap(new ServletParametersMap(servletRequest));
 		this.attributes = new ServletAttributesMap(servletRequest);
 
-		this.pathContainer = PathContainer.parsePath(path());
+		// DispatcherServlet parses the path but for other scenarios (e.g. tests) we might need to
+
+		this.requestPath = (ServletRequestPathUtils.hasParsedRequestPath(servletRequest) ?
+				ServletRequestPathUtils.getParsedRequestPath(servletRequest) :
+				ServletRequestPathUtils.parseAndCache(servletRequest));
 	}
 
 	private static List<MediaType> allSupportedMediaTypes(List<HttpMessageConverter<?>> messageConverters) {
@@ -129,18 +131,8 @@ class DefaultServerRequest implements ServerRequest {
 	}
 
 	@Override
-	public String path() {
-		String path = (String) servletRequest().getAttribute(HandlerMapping.LOOKUP_PATH);
-		if (path == null) {
-			UrlPathHelper helper = new UrlPathHelper();
-			path = helper.getLookupPathForRequest(servletRequest());
-		}
-		return path;
-	}
-
-	@Override
-	public PathContainer pathContainer() {
-		return this.pathContainer;
+	public RequestPath requestPath() {
+		return this.requestPath;
 	}
 
 	@Override
@@ -278,6 +270,10 @@ class DefaultServerRequest implements ServerRequest {
 		return Optional.ofNullable(this.serverHttpRequest.getPrincipal());
 	}
 
+	@Override
+	public String toString() {
+		return String.format("HTTP %s %s", method(), path());
+	}
 
 	static Optional<ServerResponse> checkNotModified(
 			HttpServletRequest servletRequest, @Nullable Instant lastModified, @Nullable String etag) {
@@ -305,62 +301,62 @@ class DefaultServerRequest implements ServerRequest {
 	 */
 	static class DefaultRequestHeaders implements Headers {
 
-		private final HttpHeaders delegate;
+		private final HttpHeaders httpHeaders;
 
-		public DefaultRequestHeaders(HttpHeaders delegate) {
-			this.delegate = delegate;
+		public DefaultRequestHeaders(HttpHeaders httpHeaders) {
+			this.httpHeaders = HttpHeaders.readOnlyHttpHeaders(httpHeaders);
 		}
 
 		@Override
 		public List<MediaType> accept() {
-			return this.delegate.getAccept();
+			return this.httpHeaders.getAccept();
 		}
 
 		@Override
 		public List<Charset> acceptCharset() {
-			return this.delegate.getAcceptCharset();
+			return this.httpHeaders.getAcceptCharset();
 		}
 
 		@Override
 		public List<Locale.LanguageRange> acceptLanguage() {
-			return this.delegate.getAcceptLanguage();
+			return this.httpHeaders.getAcceptLanguage();
 		}
 
 		@Override
 		public OptionalLong contentLength() {
-			long value = this.delegate.getContentLength();
+			long value = this.httpHeaders.getContentLength();
 			return (value != -1 ? OptionalLong.of(value) : OptionalLong.empty());
 		}
 
 		@Override
 		public Optional<MediaType> contentType() {
-			return Optional.ofNullable(this.delegate.getContentType());
+			return Optional.ofNullable(this.httpHeaders.getContentType());
 		}
 
 		@Override
 		public InetSocketAddress host() {
-			return this.delegate.getHost();
+			return this.httpHeaders.getHost();
 		}
 
 		@Override
 		public List<HttpRange> range() {
-			return this.delegate.getRange();
+			return this.httpHeaders.getRange();
 		}
 
 		@Override
 		public List<String> header(String headerName) {
-			List<String> headerValues = this.delegate.get(headerName);
+			List<String> headerValues = this.httpHeaders.get(headerName);
 			return (headerValues != null ? headerValues : Collections.emptyList());
 		}
 
 		@Override
 		public HttpHeaders asHttpHeaders() {
-			return HttpHeaders.readOnlyHttpHeaders(this.delegate);
+			return this.httpHeaders;
 		}
 
 		@Override
 		public String toString() {
-			return this.delegate.toString();
+			return this.httpHeaders.toString();
 		}
 	}
 
